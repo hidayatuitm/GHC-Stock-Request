@@ -42,14 +42,30 @@ document.querySelector('#app').innerHTML = `
   </div><div id="feedback" role="status" aria-live="polite"></div><button id="submit" class="primary" type="submit">Submit Spare Part Request</button></form></section>
   <section id="my-requests-panel" class="panel" hidden>
     <div class="panelhead"><div><span class="eyebrow">REQUEST MANAGEMENT</span><h2>My Requests</h2><p>View, edit or cancel your own pending requests.</p></div></div>
-    <div class="manage-note">Coming in STEP 10: secure request lookup and edit/cancel API. No request data is shown until ownership can be verified.</div>
-    <div class="fields">
-      <label>Request ID <input id="lookup-request-id" inputmode="numeric" placeholder="e.g. 101" disabled></label>
-      <label>Private Management Code <input id="lookup-token" type="password" placeholder="Provided after submitting a request" disabled autocomplete="off"></label>
-    </div>
-    <button type="button" class="primary" disabled>Find My Request (available after STEP 10)</button>
-    <div class="request-placeholder"><b>Your request details will appear here.</b><p>Pending requests will have Edit and Cancel actions after secure verification is implemented.</p>
-      <button type="button" disabled>Edit</button> <button type="button" disabled>Cancel Request</button>
+    <div class="manage-note">To protect requests, use the Request ID and one-time Private Management Code shown after submission. Requests created before this feature cannot be managed here. Only Pending requests can be edited or deleted.</div>
+    <form id="lookup-form">
+      <div class="fields">
+        <label>Request ID *<input id="lookup-request-id" name="request_id" type="number" min="1" step="1" required placeholder="e.g. 101"></label>
+        <label>Private Management Code *<input id="lookup-token" name="management_code" type="password" minlength="64" maxlength="64" pattern="[a-fA-F0-9]{64}" required placeholder="64-character code" autocomplete="off"></label>
+      </div>
+      <button type="submit" class="primary" id="find-request">Find My Request</button>
+    </form>
+    <div id="manage-feedback" role="status" aria-live="polite"></div>
+    <div id="managed-request" hidden>
+      <div id="request-summary" class="manage-summary"></div>
+      <form id="edit-request-form" hidden>
+        <div class="fields">
+          <label>Quantity Required *<input name="quantity_requested" type="number" min="1" step="1" required></label>
+          <label class="full">Problem Description *<textarea name="problem_description" maxlength="2000" required></textarea></label>
+          <label class="full">Remark / Comment<textarea name="remark" maxlength="500"></textarea></label>
+        </div>
+        <button class="primary" type="submit" id="save-request">Save Changes</button>
+        <button class="secondary-button" type="button" id="stop-editing">Cancel Editing</button>
+      </form>
+      <div id="manage-actions" class="manage-actions">
+        <button type="button" class="primary" id="edit-request">Edit Request</button>
+        <button type="button" class="danger-button" id="delete-request">Delete Request</button>
+      </div>
     </div>
   </section>
 </main><footer>Go Hub Capital · Stock Request Management System · Assignment demo</footer>`;
@@ -68,7 +84,7 @@ function render() {
 function openForm(id) {
   selected = items.find(i => i.item_id === id);
   if (!selected) return;
-  $('#request-form').reset(); $('#feedback').textContent = '';
+  $('#request-form').reset(); $('#feedback').replaceChildren();
   $('#selected-item').textContent = `${selected.item_name} · ${selected.quantity_available} available`;
   $('#request-form').elements.quantity_requested.max = selected.quantity_available;
   $('#request-section').hidden = false;
@@ -103,11 +119,155 @@ $('#request-form').addEventListener('submit', async e => {
     const response = await fetch('/api/requests', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Request failed');
-    output.className='success';output.textContent=`Request #${result.request_id} saved successfully. Status: Pending.`;
+    output.className='success';
+    output.replaceChildren();
+    const heading = document.createElement('strong');
+    heading.textContent = `Request #${result.request_id} saved successfully. Status: Pending.`;
+    output.append(heading);
+    if (result.management_code) {
+      const note = document.createElement('p');
+      note.textContent = 'IMPORTANT: Save your Private Management Code now. It is shown only once and cannot be retrieved later.';
+      const token = document.createElement('code');
+      token.className = 'management-token';
+      token.textContent = result.management_code;
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'secondary-button';
+      copy.textContent = 'Copy Management Code';
+      copy.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(result.management_code); copy.textContent = 'Copied'; }
+        catch { copy.textContent = 'Copy manually from the code above'; }
+      });
+      const idNote = document.createElement('p');
+      idNote.textContent = `For My Requests, use Request ID: ${result.request_id}`;
+      output.append(note, token, copy, idNote);
+    }
     f.reset();
   } catch(err) {output.className='error';output.textContent=err.message;}
   finally {button.disabled=false;button.textContent='Submit Spare Part Request';}
 });
+// STEP 10B: My Requests UI uses the same-origin Vercel API; never query Supabase directly.
+let activeRequest = null;
+let access = null; // kept only in this browser tab's memory; not saved in browser storage
+function setManageFeedback(message, kind = '') {
+  const box = $('#manage-feedback');
+  box.className = kind;
+  box.textContent = message;
+}
+function setBusy(button, busy, whenBusy, whenReady) {
+  button.disabled = busy;
+  button.textContent = busy ? whenBusy : whenReady;
+}
+async function manageRequest(body) {
+  const response = await fetch('/api/manage', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body), cache: 'no-store'
+  });
+  let result;
+  try { result = await response.json(); } catch { throw new Error('Server returned an invalid response'); }
+  if (!response.ok) throw new Error(result.error || 'Unable to manage request');
+  return result;
+}
+function forgetManagedRequest() {
+  activeRequest = null;
+  access = null;
+  $('#managed-request').hidden = true;
+  $('#edit-request-form').hidden = true;
+  $('#manage-actions').hidden = false;
+  $('#request-summary').replaceChildren();
+}
+function displayManagedRequest(record) {
+  activeRequest = record;
+  $('#managed-request').hidden = false;
+  $('#edit-request-form').hidden = true;
+  const pending = record.request_status === 'Pending';
+  $('#manage-actions').hidden = !pending;
+  const grid = [
+    ['Request ID', record.request_id], ['Status', record.request_status],
+    ['Item ID', record.item_id], ['Quantity', record.quantity_requested],
+    ['Technician', record.requester_name], ['Email', record.requester_email],
+    ['Phone', record.phone_number], ['Ticket Number', record.incident_ticket_number],
+    ['Region', record.region], ['Problem Description', record.problem_description],
+    ['Remark', record.remark || '—'], ['Submitted', record.request_date]
+  ];
+  const summary = $('#request-summary');
+  summary.replaceChildren();
+  const title = document.createElement('h3'); title.textContent = 'Request Details'; summary.append(title);
+  const dl = document.createElement('dl');
+  for (const [label, value] of grid) {
+    const dt = document.createElement('dt'); dt.textContent = label;
+    const dd = document.createElement('dd'); dd.textContent = String(value ?? '—');
+    dl.append(dt, dd);
+  }
+  summary.append(dl);
+  const form = $('#edit-request-form');
+  form.elements.quantity_requested.value = record.quantity_requested;
+  form.elements.problem_description.value = record.problem_description;
+  form.elements.remark.value = record.remark || '';
+  if (!pending) setManageFeedback('This request is not Pending and cannot be edited or deleted.');
+}
+$('#lookup-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  forgetManagedRequest();
+  setManageFeedback('');
+  const request_id = Number($('#lookup-request-id').value);
+  const management_code = $('#lookup-token').value.trim().toLowerCase();
+  if (!Number.isSafeInteger(request_id) || request_id <= 0 || !/^[a-f0-9]{64}$/.test(management_code)) {
+    setManageFeedback('Enter a valid Request ID and the complete 64-character Management Code.', 'error');
+    return;
+  }
+  const button = $('#find-request'); setBusy(button, true, 'Searching...', 'Find My Request');
+  try {
+    const result = await manageRequest({action:'read', request_id, management_code});
+    access = {request_id, management_code};
+    displayManagedRequest(result.request);
+    setManageFeedback('Request found.', 'success');
+  } catch (err) {setManageFeedback(err.message, 'error');}
+  finally {setBusy(button, false, 'Searching...', 'Find My Request');}
+});
+$('#edit-request').addEventListener('click', () => {
+  if (!activeRequest || activeRequest.request_status !== 'Pending') return;
+  $('#edit-request-form').hidden = false;
+  $('#manage-actions').hidden = true;
+  setManageFeedback('Edit the fields, then click Save Changes.');
+});
+$('#stop-editing').addEventListener('click', () => {
+  $('#edit-request-form').hidden = true;
+  $('#manage-actions').hidden = false;
+  setManageFeedback('Editing cancelled.');
+});
+$('#edit-request-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!activeRequest || !access) return;
+  const form = e.currentTarget;
+  const quantity_requested = Number(form.elements.quantity_requested.value);
+  const problem_description = form.elements.problem_description.value.trim();
+  const remark = form.elements.remark.value.trim();
+  if (!Number.isSafeInteger(quantity_requested) || quantity_requested < 1 || !problem_description) {
+    setManageFeedback('Enter a valid quantity and problem description.', 'error'); return;
+  }
+  const button = $('#save-request'); setBusy(button, true, 'Saving...', 'Save Changes');
+  try {
+    const result = await manageRequest({...access, action:'update', quantity_requested, problem_description, remark});
+    displayManagedRequest(result.request);
+    setManageFeedback('Request updated successfully.', 'success');
+  } catch (err) {setManageFeedback(err.message, 'error');}
+  finally {setBusy(button, false, 'Saving...', 'Save Changes');}
+});
+$('#delete-request').addEventListener('click', async () => {
+  if (!activeRequest || !access) return;
+  if (!window.confirm(`Permanently delete Request #${activeRequest.request_id}? This cannot be undone.`)) return;
+  const button = $('#delete-request'); setBusy(button, true, 'Deleting...', 'Delete Request');
+  try {
+    const id = activeRequest.request_id;
+    await manageRequest({...access, action:'delete'});
+    forgetManagedRequest();
+    $('#lookup-form').reset();
+    setManageFeedback(`Request #${id} deleted successfully.`, 'success');
+  } catch (err) {setManageFeedback(err.message, 'error');}
+  finally {setBusy(button, false, 'Deleting...', 'Delete Request');}
+});
+
 async function load() {
   try {
     const response = await fetch('/api/items', {headers:{'Accept':'application/json'}});
