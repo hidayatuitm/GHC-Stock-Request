@@ -21,7 +21,11 @@ document.querySelector('#app').innerHTML = `
 <header class="topbar"><div class="container barinner"><div class="brand"><span class="brandmark">go<span>HUB</span></span><div><b>Go Hub Capital</b><small>SPARE PART REQUEST MANAGEMENT</small></div></div><span class="pill">Technician Portal</span></div></header>
 <main class="container">
   <section class="hero"><span class="eyebrow">STAFF PORTAL</span><h1>Find a spare part.<br><em>Submit a request.</em></h1><p>Check available stock and record a spare part request in a few simple steps.</p></section>
-  <section class="panel"><div class="panelhead"><div><h2>Available Spare Parts</h2><p>Find an item by name or category.</p></div><span id="count" class="count">8 items</span></div>
+  <nav class="portal-tabs" aria-label="Technician portal sections">
+    <button id="tab-stock" type="button" class="portal-tab active" aria-selected="true">Spare Parts</button>
+    <button id="tab-requests" type="button" class="portal-tab" aria-selected="false">My Requests</button>
+  </nav>
+  <section id="inventory-panel" class="panel"><div class="panelhead"><div><h2>Available Spare Parts</h2><p>Find an item by name or category.</p></div><span id="count" class="count">8 items</span></div>
   <div class="filters"><input id="search" type="search" placeholder="Search spare part or category..." aria-label="Search spare parts" /><select id="category" aria-label="Filter category"><option value="">All categories</option></select></div>
   <div id="notice" class="notice">Loading stock data...</div><div id="list" class="parts"></div></section>
   <section id="request-section" class="panel form-panel" hidden><div class="panelhead"><div><span class="eyebrow">REQUEST FORM</span><h2>Request a spare part</h2><p id="selected-item"></p></div><button type="button" id="close" class="linkbutton">Close ✕</button></div>
@@ -36,6 +40,18 @@ document.querySelector('#app').innerHTML = `
     <label class="full">Remark / Comment<textarea name="remark" maxlength="500" placeholder="Optional information"></textarea></label>
     <label class="full">Staff Access Code *<input name="access_code" type="password" required autocomplete="off" placeholder="Demo access code"></label>
   </div><div id="feedback" role="status" aria-live="polite"></div><button id="submit" class="primary" type="submit">Submit Spare Part Request</button></form></section>
+  <section id="my-requests-panel" class="panel" hidden>
+    <div class="panelhead"><div><span class="eyebrow">REQUEST MANAGEMENT</span><h2>My Requests</h2><p>View, edit or cancel your own pending requests.</p></div></div>
+    <div class="manage-note">Coming in STEP 10: secure request lookup and edit/cancel API. No request data is shown until ownership can be verified.</div>
+    <div class="fields">
+      <label>Request ID <input id="lookup-request-id" inputmode="numeric" placeholder="e.g. 101" disabled></label>
+      <label>Private Management Code <input id="lookup-token" type="password" placeholder="Provided after submitting a request" disabled autocomplete="off"></label>
+    </div>
+    <button type="button" class="primary" disabled>Find My Request (available after STEP 10)</button>
+    <div class="request-placeholder"><b>Your request details will appear here.</b><p>Pending requests will have Edit and Cancel actions after secure verification is implemented.</p>
+      <button type="button" disabled>Edit</button> <button type="button" disabled>Cancel Request</button>
+    </div>
+  </section>
 </main><footer>Go Hub Capital · Stock Request Management System · Assignment demo</footer>`;
 
 function render() {
@@ -58,6 +74,19 @@ function openForm(id) {
   $('#request-section').hidden = false;
   $('#request-section').scrollIntoView({behavior:'smooth',block:'start'});
 }
+function showTab(name) {
+  const showStock = name === 'stock';
+  $('#inventory-panel').hidden = !showStock;
+  $('#my-requests-panel').hidden = showStock;
+  if (!showStock) $('#request-section').hidden = true;
+  else if (selected) $('#request-section').hidden = false;
+  $('#tab-stock').classList.toggle('active', showStock);
+  $('#tab-requests').classList.toggle('active', !showStock);
+  $('#tab-stock').setAttribute('aria-selected', String(showStock));
+  $('#tab-requests').setAttribute('aria-selected', String(!showStock));
+}
+$('#tab-stock').addEventListener('click', () => showTab('stock'));
+$('#tab-requests').addEventListener('click', () => showTab('requests'));
 $('#close').addEventListener('click',()=>{ $('#request-section').hidden = true; selected = null; });
 $('#search').addEventListener('input',render);
 $('#category').addEventListener('change',render);
