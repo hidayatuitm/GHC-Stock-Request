@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { database, reply } from './_db.js';
 
 function equalSecrets(a, b) {
@@ -7,6 +7,7 @@ function equalSecrets(a, b) {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 const clean = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
+const sha256 = v => createHash('sha256').update(v).digest('hex');
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return reply(res, 405, { error: 'Method not allowed' });
@@ -26,23 +27,38 @@ export default async function handler(req, res) {
     const item_id = Number(b.item_id);
     const quantity_requested = Number(b.quantity_requested);
 
-    if (!requester_name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requester_email) || !phone_number ||
-        !incident_ticket_number || !['Northern','Central','Southern','Eastern'].includes(region) ||
+    if (!requester_name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requester_email) ||
+        !phone_number || !incident_ticket_number ||
+        !['Northern','Central','Southern','Eastern'].includes(region) ||
         !problem_description || !Number.isSafeInteger(item_id) || item_id <= 0 ||
         !Number.isSafeInteger(quantity_requested) || quantity_requested <= 0) {
       return reply(res, 400, { error: 'Please complete all required fields correctly' });
     }
+
     const db = database();
-    const { data: item, error: lookupError } = await db.from('item').select('quantity_available').eq('item_id', item_id).maybeSingle();
+    const { data: item, error: lookupError } = await db.from('item')
+      .select('quantity_available').eq('item_id', item_id).maybeSingle();
     if (lookupError) throw lookupError;
     if (!item) return reply(res, 404, { error: 'Item not found' });
-    if (quantity_requested > item.quantity_available) return reply(res, 400, { error: 'Requested quantity exceeds displayed stock' });
+    if (quantity_requested > item.quantity_available) {
+      return reply(res, 400, { error: 'Requested quantity exceeds displayed stock' });
+    }
+
+    // Generate an unpredictable, unique code. Never save the raw code in Supabase.
+    const management_code = randomBytes(32).toString('hex');
+    const request_access_token_hash = sha256(management_code);
     const { data, error } = await db.from('stock_request').insert({
-      item_id, requester_name, requester_email, phone_number, incident_ticket_number,
-      region, quantity_requested, problem_description, remark, request_status: 'Pending'
+      item_id, requester_name, requester_email, phone_number,
+      incident_ticket_number, region, quantity_requested,
+      problem_description, remark, request_status: 'Pending',
+      request_access_token_hash
     }).select('request_id').single();
     if (error) throw error;
-    return reply(res, 201, { success: true, request_id: data.request_id, status: 'Pending' });
+
+    // Display this one time only. API requests and responses must not be logged.
+    return reply(res, 201, {
+      success: true, request_id: data.request_id, status: 'Pending', management_code
+    });
   } catch (err) {
     console.error('Request API failed:', err.message);
     return reply(res, 500, { error: 'Unable to save request' });
