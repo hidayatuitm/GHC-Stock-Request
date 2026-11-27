@@ -11,3 +11,22 @@
 .request-placeholder button {padding:10px 18px;margin:8px 4px 0 0;border-radius:10px;border:1px solid #dae4e8;background:#f1f4f6;color:#82929b}
 #my-requests-panel .primary:disabled {opacity:.5;cursor:not-allowed}
 @media(max-width:640px){.portal-tab{flex:1;padding:12px 10px}}
+
+/* STEP 10B — secure request lookup, editing and deletion */
+#manage-feedback:not(:empty){padding:14px;margin-top:16px;border-radius:10px;line-height:1.5}
+.manage-summary{margin-top:20px;padding:18px;border:1px solid #dce8ed;border-radius:13px}
+.manage-summary h3{margin-top:0}
+.manage-summary dl{display:grid;grid-template-columns:minmax(120px,1fr) 2fr;gap:11px 16px;margin:0}
+.manage-summary dt{font-weight:700;color:#526f82;font-size:13px}
+.manage-summary dd{margin:0;font-size:13px;overflow-wrap:anywhere}
+.manage-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.danger-button,.secondary-button{background:white;border:1px solid #b5cbd6;border-radius:11px;padding:12px 16px;font:inherit;font-weight:700;cursor:pointer;color:#193e50}
+.danger-button{border-color:#c84646;color:#b02929}
+.danger-button:hover{background:#fff0f0}
+.secondary-button:hover{background:#eef6f8}
+#edit-request-form{margin-top:20px}
+#edit-request-form .secondary-button{margin-left:10px}
+.management-token{display:block;padding:12px;border:1px solid #91c4a5;border-radius:8px;background:#f5fff8;color:#153e2d;overflow-wrap:anywhere;margin:12px 0;font-size:12px;user-select:all}
+#feedback p{margin:9px 0}
+#feedback .secondary-button{margin:5px 0}
+@media(max-width:640px){.manage-summary dl{grid-template-columns:1fr;gap:4px}.manage-summary dd{margin-bottom:10px}}
